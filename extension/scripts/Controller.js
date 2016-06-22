@@ -39,6 +39,8 @@ SitemapController.prototype = {
 			'SitemapCreate',
 			'SitemapStartUrlField',
 			'SitemapImport',
+			'SitemapBatchImport',
+			'SitemapExportAll',
 			'SitemapExport',
 			'SitemapBrowseData',
 			'SitemapScrapeConfig',
@@ -89,6 +91,12 @@ SitemapController.prototype = {
 				'#create-sitemap-import-nav-button': {
 					click: this.showImportSitemapPanel
 				},
+				'#create-sitemap-batch-import-nav-button': {
+					click: this.showBatchImportSitemapsPanel
+				},
+				'#create-sitemap-export-all-nav-button': {
+					click: this.showExportAllSitemapsPanel
+				},
 				'#sitemap-export-nav-button': {
 					click: this.showSitemapExportPanel
 				},
@@ -100,6 +108,9 @@ SitemapController.prototype = {
 				},
 				'#submit-import-sitemap': {
 					click: this.importSitemap
+				},
+				'#submit-batch-import-sitemap': {
+					click: this.batchImportSitemap
 				},
 				'#sitemap-edit-metadata-nav-button': {
 					click: this.editSitemapMetadata
@@ -391,6 +402,38 @@ SitemapController.prototype = {
 		return true;
 	},
 
+	showBatchImportSitemapsPanel: function () {
+		this.setActiveNavigationButton('create-sitemap-batch-import');
+		var sitemapForm = ich.SitemapBatchImport();
+		$("#viewport").html(sitemapForm);
+		this.initImportStiemapValidation();
+		return true;
+	},
+
+	showExportAllSitemapsPanel: function () {
+		this.setActiveNavigationButton('create-sitemap-export-all');
+		var sitemapAllJSON = 'test2';
+		this.store.getAllSitemaps(function (sitemaps) {
+
+			sitemapAllJSON = '[';
+			sitemaps.forEach(function (sitemap) {
+				sitemapAllJSON += sitemap.exportSitemap();
+				sitemapAllJSON += ',';
+			});
+
+			sitemapAllJSON = sitemapAllJSON.slice(0, -1);
+			sitemapAllJSON += ']';
+
+
+			var sitemapExportAllForm = ich.SitemapExportAll({
+				sitemapAllJSON: sitemapAllJSON
+			});
+			$("#viewport").html(sitemapExportAllForm);
+		});
+		
+		return true;
+	},
+
 	showSitemapExportPanel: function () {
 		this.setActiveNavigationButton('sitemap-export');
 		var sitemap = this.state.currentSitemap;
@@ -495,6 +538,41 @@ SitemapController.prototype = {
 				}.bind(this, sitemap));
 			}
 		}.bind(this));
+	},
+
+	batchImportSitemap: function () {
+
+		// cancel submit if invalid form
+		if(!this.isValidForm()) {
+			return false;
+		}
+
+		// load data from form
+		var sitemapBatchJSON = $("[name=sitemapBatchJSON]").val();
+		var sitemaps = JSON.parse(sitemapBatchJSON);
+		var importErrors = [];
+		var errorMsg = "<p>";
+
+		var that = this;
+		sitemaps.forEach(function (sitemap) {
+			sitemapJSON = JSON.stringify(sitemap);
+			sitemap = new Sitemap();
+			sitemap.importSitemap(sitemapJSON);
+			// check whether sitemap with this id already exist
+			that.store.sitemapExists(sitemap._id, function (sitemapExists) {
+				if(sitemapExists) {
+					alert(sitemap._id + ': sitemap already exists and therefore will not be imported');
+					importErrors[importErrors.length] = sitemap._id;
+					var validator = that.getFormValidator();
+					validator.updateStatus('_id', 'INVALID', 'callback');
+				}
+				else {
+					that.store.createSitemap(sitemap, function (sitemap) {
+						that._editSitemap(sitemap, ['_root']);
+					}.bind(that, sitemap));
+				}
+			}.bind(that));
+		});
 	},
 
 	editSitemapMetadata: function (button) {
