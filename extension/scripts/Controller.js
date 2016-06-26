@@ -41,6 +41,7 @@ SitemapController.prototype = {
 			'SitemapImport',
 			'SitemapBatchImport',
 			'SitemapExportAll',
+			'SitemapScrapeAllConfig',
 			'SitemapExport',
 			'SitemapBrowseData',
 			'SitemapScrapeConfig',
@@ -97,6 +98,9 @@ SitemapController.prototype = {
 				'#create-sitemap-export-all-nav-button': {
 					click: this.showExportAllSitemapsPanel
 				},
+				'#create-sitemap-scrape-all-nav-button': {
+					click: this.showScrapeAllSitemapsPanel
+				},
 				'#sitemap-export-nav-button': {
 					click: this.showSitemapExportPanel
 				},
@@ -144,6 +148,12 @@ SitemapController.prototype = {
 				},
 				'#submit-scrape-sitemap': {
 					click: this.scrapeSitemap
+				},
+				'#submit-scrape-all-sitemaps-form': {
+					submit: function(){return false;}
+				},
+				'#submit-scrape-all-sitemaps': {
+					click: this.scrapeAllSitemaps
 				},
 				"#sitemaps button[action=browse-sitemap-data]": {
 					click: this.sitemapListBrowseSitemapData
@@ -412,7 +422,7 @@ SitemapController.prototype = {
 
 	showExportAllSitemapsPanel: function () {
 		this.setActiveNavigationButton('create-sitemap-export-all');
-		var sitemapAllJSON = 'test2';
+		var sitemapAllJSON = '';
 		this.store.getAllSitemaps(function (sitemaps) {
 
 			sitemapAllJSON = '[';
@@ -431,6 +441,14 @@ SitemapController.prototype = {
 			$("#viewport").html(sitemapExportAllForm);
 		});
 		
+		return true;
+	},
+
+	showScrapeAllSitemapsPanel: function () {	
+		this.setActiveNavigationButton('create-sitemap-scrape-all');
+		var scrapeAllConfigPanel = ich.SitemapScrapeAllConfig();
+		$("#viewport").html(scrapeAllConfigPanel);
+		this.initScrapeAllSitemapConfigValidation();
 		return true;
 	},
 
@@ -553,26 +571,25 @@ SitemapController.prototype = {
 		var importErrors = [];
 		var errorMsg = "<p>";
 
-		var that = this;
 		sitemaps.forEach(function (sitemap) {
 			sitemapJSON = JSON.stringify(sitemap);
 			sitemap = new Sitemap();
 			sitemap.importSitemap(sitemapJSON);
 			// check whether sitemap with this id already exist
-			that.store.sitemapExists(sitemap._id, function (sitemapExists) {
+			this.store.sitemapExists(sitemap._id, function (sitemapExists) {
 				if(sitemapExists) {
 					alert(sitemap._id + ': sitemap already exists and therefore will not be imported');
 					importErrors[importErrors.length] = sitemap._id;
-					var validator = that.getFormValidator();
+					var validator = this.getFormValidator();
 					validator.updateStatus('_id', 'INVALID', 'callback');
 				}
 				else {
-					that.store.createSitemap(sitemap, function (sitemap) {
-						that._editSitemap(sitemap, ['_root']);
-					}.bind(that, sitemap));
+					this.store.createSitemap(sitemap, function (sitemap) {
+						this._editSitemap(sitemap, ['_root']);
+					}.bind(this, sitemap));
 				}
-			}.bind(that));
-		});
+			}.bind(this));
+		}.bind(this));
 	},
 
 	editSitemapMetadata: function (button) {
@@ -1065,6 +1082,60 @@ SitemapController.prototype = {
 				}
 			}
 		});
+	 },
+	initScrapeAllSitemapConfigValidation: function(){
+		$('#viewport form').bootstrapValidator({
+			fields: {
+				"requestInterval": {
+					validators: {
+						notEmpty: {
+							message: 'The request interval is required and cannot be empty'
+						},
+						numeric: {
+							message: 'The request interval must be numeric'
+						},
+						callback: {
+							message: 'The request interval must be atleast 2000 milliseconds',
+							callback: function(value, validator) {
+								return value >= 2000;
+							}
+						}
+					}
+				},
+				"pageLoadDelay": {
+					validators: {
+						notEmpty: {
+							message: 'The page load delay is required and cannot be empty'
+						},
+						numeric: {
+							message: 'The page laod delay must be numeric'
+						},
+						callback: {
+							message: 'The page load delay must be atleast 500 milliseconds',
+							callback: function(value, validator) {
+								return value >= 500;
+							}
+						}
+					}
+				},
+				"scrapeDelay": {
+					validators: {
+						notEmpty: {
+							message: 'The delay between scrapes is required and cannot be empty'
+						},
+						numeric: {
+							message: 'The delay between scrapes must be numeric'
+						},
+						callback: {
+							message: 'The delay between scrapes must be at least 5000 milliseconds',
+							callback: function(value, validator) {
+								return value >= 5000;
+							}
+						}
+					}
+				}
+			}
+		});
 	},
 	showScrapeSitemapConfigPanel: function() {
 
@@ -1096,6 +1167,50 @@ SitemapController.prototype = {
 		$(".scraping-in-progress").removeClass("hide");
 		$("#submit-scrape-sitemap").closest(".form-group").hide();
 		$("#scrape-sitemap-config input").prop('disabled', true);
+
+		chrome.runtime.sendMessage(request, function (response) {
+			this.browseSitemapData();
+		}.bind(this));
+		return false;
+	},
+	scrapeAllSitemaps: function () {
+
+		// if(!this.isValidForm()) {
+		// 	return false;
+		// }
+
+		var requestInterval = $("input[name=requestInterval]").val();
+		var pageLoadDelay = $("input[name=pageLoadDelay]").val();
+		var scrapeDelay = $("input[name=scrapeDelay]").val();
+		var counter = 1;
+		var timeoutDelay = 0;
+
+		// show sitemap scraping panel
+		this.getFormValidator().destroy();
+		$(".scraping-in-progress").removeClass("hide");
+		$("#submit-scrape-sitemap").closest(".form-group").hide();
+		$("#scrape-sitemap-config input").prop('disabled', true);
+
+		this.store.getAllSitemaps(function (sitemaps) {
+			var t = [];
+
+			var that = this;
+			sitemaps.forEach(function (sitemap) {
+				t[counter - 1] = window.setTimeout(function() {
+					this.scrapeThisSitemap(sitemap, requestInterval, pageLoadDelay);
+				}.bind(this), timeoutDelay);
+				timeoutDelay = counter * scrapeDelay;
+				counter++;
+			}.bind(this));
+		}.bind(this));
+	},
+	scrapeThisSitemap: function (sitemap, requestInterval, pageLoadDelay) {
+		var request = {
+			scrapeSitemap: true,
+			sitemap: JSON.parse(JSON.stringify(sitemap)),
+			requestInterval: requestInterval,
+			pageLoadDelay: pageLoadDelay
+		};
 
 		chrome.runtime.sendMessage(request, function (response) {
 			this.browseSitemapData();
